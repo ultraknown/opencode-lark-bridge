@@ -20,6 +20,7 @@ opencode-lark-bridge/
 │   ├── config.ts             # JSONC 配置加载 + target 解析
 │   ├── types.ts              # Notifier/Logger/PluginConfig 接口
 │   ├── logger.ts             # 文件日志（北京时区，静默降级）
+│   ├── spawn.ts              # 运行时无关的 shell 执行（Bun / Node 双后端）
 │   ├── events/               # 事件处理核心，见子目录 AGENTS.md
 │   └── notifier/lark-notifier.ts  # 构造 lark-cli shell 命令并执行
 ├── tests/                    # Bun test，*.test.ts，与源码同名映射
@@ -39,6 +40,7 @@ opencode-lark-bridge/
 | ----------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | 新增/修改事件处理   | `src/events/`                                                                    | 见 `src/events/AGENTS.md`                                       |
 | 改通知发送方式     | `src/notifier/lark-notifier.ts`                                                  | 构造 `lark-cli im +messages-send` 命令                             |
+| 改子进程调用/宿主兼容 | `src/spawn.ts`                                                                   | `runShell` 按运行时选 Bun/Node 后端；桌面版无 `Bun` 全局          |
 | 改配置加载/校验    | `src/config.ts` + `src/types.ts`                                                 | `comment-json` 解析 JSONC                                        |
 | 改插件 hook 注册 | `src/index.ts`                                                                   | `OpenCodeLarkBridge(ctx)` 返回 event/permission.ask/session.idle |
 | 改安装/配置初始化   | `src/postinstall.ts` + `src/cli.ts`                                              | 全局识别靠 `npm_config_global` + 路径探测                               |
@@ -56,6 +58,10 @@ opencode-lark-bridge/
 | `resolveConfigPath`  | fn    | src/index.ts:14                    | index.test.ts                | 项目级 → 全局配置查找顺序                                                                 |
 | `createEventHandler` | fn    | src/events/event-handler.ts:7      | index.ts, 2 tests            | 去重 + 子代理过滤 + 路由到 mappers（见子目录 AGENTS.md）                                       |
 | `createLarkNotifier` | fn    | src/notifier/lark-notifier.ts:9    | index.ts, 2 tests            | 构造 `lark-cli im +messages-send --as bot --text` 命令                             |
+| `runShell`           | fn    | src/spawn.ts:45                    | index.ts, spawn.test.ts       | 运行时探测后委派 `runShellBun`/`runShellNode`；`createLarkNotifier` 的 execute 实现 |
+| `createShellRunner`  | fn    | src/spawn.ts:41                    | spawn.test.ts                 | 接缝：注入 `detect` 以便测试两条分支                                                  |
+| `runShellBun`        | fn    | src/spawn.ts:11                    | createShellRunner             | `Bun.spawn` 后端（CLI/TUI 宿主）                                                      |
+| `runShellNode`       | fn    | src/spawn.ts:23                    | createShellRunner, spawn.test  | `node:child_process` 后端，供 Electron/Node 宿主                                       |
 | `escapeShellArg`     | fn    | src/notifier/lark-notifier.ts:5    | lark-notifier.ts             | 双引号包裹 + 转义内嵌双引号                                                                |
 | `mapPermissionEvent` | fn    | src/events/permission-mapper.ts:99 | event-handler, index, test   | 提取 tool/operation/resource，渲染模板                                                |
 | `extractResource`    | fn    | src/events/permission-mapper.ts:49 | event-handler, test          | 按 tool 类型（bash/read/webfetch/task/skill/...）提取资源字段                             |
@@ -73,7 +79,7 @@ opencode-lark-bridge/
 
 ## CONVENTIONS
 
-- **运行时**: Bun（非 Node.js）；`"type": "module"` ESM
+- **运行时**: Bun（CLI/TUI 宿主）或 Node.js（OpenCode 桌面版 Electron 宿主）；`"type": "module"` ESM
 - **TypeScript**: `strict: true`，`target/module: ESNext`，`moduleResolution: bundler`，`declaration + declarationMap`
 - **导入**: Node 内置用 `node:` 前缀；相对导入必须带 `.js` 扩展名（ESM + bundler resolution）
 - **测试**: Bun test，`tests/*.test.ts` 与源码同名映射，`tests/fixtures/` 放夹具；`import { describe, it, expect, beforeEach, afterEach } from "bun:test"`
@@ -84,6 +90,7 @@ opencode-lark-bridge/
 ## ANTI-PATTERNS (THIS PROJECT)
 
 - **禁止读取 .env 文件**（见 docs/OPENCODE_PLUGIN_DEV_GUIDE.md 安全策略）
+- **禁止裸用 `Bun` 全局**：桌面版宿主无 `Bun`，子进程调用一律走 `src/spawn.ts` 的 `runShell`
 - **事件 hook 只读，不得修改 event 对象**（OpenCode 插件约束）
 - **状态必须内存内**：`createEventHandler` 内的 `lastSent`/`subagentSessionIds`/`pendingChildren` 不持久化、不跨进程
 - **不得为子代理完成单独发通知**：仅主会话 idle 且待完成子集合为空时发 completion

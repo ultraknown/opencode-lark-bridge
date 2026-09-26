@@ -4,6 +4,7 @@ import os from "node:os"
 import { loadConfig, getEffectiveTarget } from "./config.js"
 import { createFileLogger } from "./logger.js"
 import { createLarkNotifier } from "./notifier/lark-notifier.js"
+import { runShell } from "./spawn.js"
 import { createEventHandler } from "./events/event-handler.js"
 import { mapPermissionEvent } from "./events/permission-mapper.js"
 import type { Logger } from "./types.js"
@@ -51,16 +52,7 @@ export const OpenCodeLarkBridge = async (ctx: any) => {
     return { event: async () => {} }
   }
 
-  const notifier = createLarkNotifier(logger, async (command: string) => {
-    const proc = Bun.spawn(["bash", "-c", command], {
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    const exitCode = await proc.exited
-    const stdout = await new Response(proc.stdout).text()
-    const stderr = await new Response(proc.stderr).text()
-    return { exitCode, stdout, stderr }
-  })
+  const notifier = createLarkNotifier(logger, runShell)
 
   const handler = createEventHandler(config, notifier, logger)
 
